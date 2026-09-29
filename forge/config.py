@@ -56,7 +56,7 @@ MODEL_TPM = {
 DEFAULT_TPM = 6000
 
 # Free-tier requests-per-minute, per key (each key is a separate org with its own bucket).
-# Override in config.toml: [limits] rpm = { "gemini-2.5-flash" = 10 }
+# Override in config.toml: [limits] rpm = { "gemini-3.8-flash" = 10 }
 MODEL_RPM = {
     "openai/gpt-oss-120b": 30,
     "openai/gpt-oss-20b": 30,
@@ -250,7 +250,7 @@ def write_starter_config() -> Path:
                     "[routing]",
                     "# Optional per-phase model preference; Forge sends each request to the first",
                     "# model with free TPM/RPM right now. Example:",
-                    '# code = ["openai/gpt-oss-120b", "gemini-2.5-flash"]',
+                    '# code = ["openai/gpt-oss-120b", "gemini-3.8-flash"]',
                     "",
                     "[models]",
                     'fast = "openai/gpt-oss-20b"',
