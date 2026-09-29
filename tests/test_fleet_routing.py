@@ -135,8 +135,9 @@ def test_router_spills_to_groq_when_gemini_is_saturated():
     fleet = FleetClient(cfg)
     try:
         gem_keys = fleet.providers["gemini"].keys
-        for _ in range(cfg.rpm_limit(GEMINI_FLASH)):
-            gem_keys.record(gem_keys.states[0], GEMINI_FLASH, 10)
+        for model in (GEMINI_FLASH, GEMINI_FLASH_LITE):
+            for _ in range(cfg.rpm_limit(model)):
+                gem_keys.record(gem_keys.states[0], model, 10)
         assert ModelRouter(cfg, fleet).choose("explore", need=5_000) == FAST
     finally:
         fleet.close()
