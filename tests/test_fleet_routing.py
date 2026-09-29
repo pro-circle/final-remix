@@ -72,9 +72,11 @@ def test_key_is_skipped_once_its_own_minute_is_full():
     km = KeyManager(["k1", "k2"], "gemini")
     first = km.states[0]
     km.record(first, GEMINI_FLASH, 240_000)
+    assert not first.fits(GEMINI_FLASH, 50_000, tpm=250_000, rpm=10)
     picked = km.acquire(GEMINI_FLASH, need=50_000, tpm=250_000, rpm=10)
     assert picked.key == "k2"
-    assert not km.headroom(GEMINI_FLASH, need=250_000, tpm=250_000, rpm=10) is False
+    assert km.headroom(GEMINI_FLASH, 50_000, tpm=250_000, rpm=10) is True  # k2 still free
+
 
 
 def test_rpm_is_tracked_per_key_and_model():
