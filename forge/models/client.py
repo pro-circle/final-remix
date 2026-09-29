@@ -110,6 +110,10 @@ class GroqClient:
 
         last_error = ""
         attempt = 0
+        # A provider outage (5xx / network) must not eat the clock: try each key at most
+        # once, briefly, then hand back so the router can move to the next model/provider.
+        server_failures = 0
+        server_budget = max(2, len(self.keys.states))
         rate_limit_deadline = time.time() + 600  # keep waiting out rate limits for up to 10 min
         while attempt < max_attempts:
             state = self.keys.acquire(model, need, tpm, rpm)
@@ -125,9 +129,13 @@ class GroqClient:
             except httpx.HTTPError as exc:
                 last_error = f"network error: {exc}"
                 self.keys.report_failure(state, last_error)
-                time.sleep(min(8.0, 1.5**attempt) + random.random())
+                server_failures += 1
+                if server_failures >= server_budget:
+                    raise UpstreamUnavailable(f"{self.name} unreachable: {last_error}")
+                time.sleep(min(1.5, 0.4 * server_failures) + random.random() * 0.2)
                 attempt += 1
                 continue
+
 
             if response.status_code in (400, 401, 403) and (
                 "API_KEY_INVALID" in response.text or "API key not valid" in response.text
