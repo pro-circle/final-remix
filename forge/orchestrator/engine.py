@@ -265,10 +265,15 @@ class Orchestrator:
         context = build_repo_context(self.root, request, int(budget * 0.3))
         return project_briefing(self.profile.summary(), repo_map(self.root, tree_entries), context)
 
-    def _pick(self, phase: str, messages: list[dict[str, Any]] | None = None) -> str:
+    def _pick(
+        self,
+        phase: str,
+        messages: list[dict[str, Any]] | None = None,
+        exclude: set[str] | None = None,
+    ) -> str:
         """Model for this phase, chosen from the phase's chain by live key capacity."""
         need = messages_tokens(messages) + 1_000 if messages else 0
-        return self.router.choose(phase, need=need, client=self.client)
+        return self.router.choose(phase, need=need, client=self.client, exclude=exclude)
 
     def _chat(
         self,
@@ -279,33 +284,50 @@ class Orchestrator:
         model: str | None = None,
     ):
         """Pick a model with free capacity, fit the prompt to it; on a 413 shrink and retry."""
+        pinned = model
+        dead: set[str] = set()
         chosen = model or self._pick(phase, messages)
         budget = self.router.context_budget_for(chosen)
-        for _ in range(6):
+        for _ in range(8):
             fitted = fit_messages(messages, budget)
             try:
                 if tools is None:
                     return fitted, self.client.chat(model=chosen, messages=fitted)
                 return fitted, self.client.chat(model=chosen, messages=fitted, tools=tools)
+            except UpstreamUnavailable as exc:
+                # The provider is failing right now (503 / unreachable): drop this model
+                # from the chain and slide to the next one, which may be another provider.
+                dead.add(chosen)
+                pinned = None  # a pinned model that is down must not trap the run
+                previous, chosen = chosen, self._pick(phase, messages, exclude=dead)
+                if chosen in dead:
+                    raise ModelError(
+                        f"Every model for this step is unavailable ({exc}). "
+                        "Check your keys or try again shortly."
+                    ) from exc
+                budget = self.router.context_budget_for(chosen)
+                self.bus.emit(NOTICE, message=f"{previous} unavailable ({exc}); switching to {chosen}.")
             except ModelUnavailable as exc:
                 # No key can call this model any more (learned live): move down the chain.
-                if model is not None:
+                if pinned is not None:
                     raise ModelError(str(exc)) from exc
-                previous, chosen = chosen, self._pick(phase, messages)
-                if chosen == previous:
+                dead.add(chosen)
+                previous, chosen = chosen, self._pick(phase, messages, exclude=dead)
+                if chosen in dead:
                     raise ModelError(str(exc)) from exc
                 budget = self.router.context_budget_for(chosen)
-                self.bus.emit(NOTICE, text=f"{previous} unavailable on every key; switching to {chosen}.")
+                self.bus.emit(NOTICE, message=f"{previous} unavailable on every key; switching to {chosen}.")
             except RequestTooLarge as exc:
                 limit = exc.limit or budget
                 # Our estimate was low for this text: learn the real ceiling and shrink.
                 self.cfg.tpm_limits[chosen] = min(self.cfg.tpm_limit(chosen), limit)
                 budget = max(1_500, int(min(budget, limit - 1_800) * 0.7))
-                self.bus.emit(NOTICE, text=f"Prompt too large for {chosen}; shrinking to ~{budget} tokens and retrying.")
+                self.bus.emit(NOTICE, message=f"Prompt too large for {chosen}; shrinking to ~{budget} tokens and retrying.")
         raise ModelError(
             f"{chosen} rejects even a {budget}-token prompt. Raise [limits] in ~/.forge/config.toml "
             "or switch [models] to one with a higher tokens-per-minute limit."
         )
+
 
     def _single_shot(self, *, phase: str, briefing: str, instruction: str) -> str:
         messages = [
