@@ -48,12 +48,24 @@ class ModelRouter:
         candidates = self.cfg.candidates(phase, PHASE_ROLE.get(phase, "deep"))
         return candidates[0] if candidates else self.cfg.model_for(PHASE_ROLE.get(phase, "deep"))
 
-    def choose(self, phase: str, need: int = 0, client: Any | None = None) -> str:
-        """Pick the best model for this phase given live per-key capacity."""
+    def choose(
+        self,
+        phase: str,
+        need: int = 0,
+        client: Any | None = None,
+        exclude: set[str] | None = None,
+    ) -> str:
+        """Pick the best model for this phase given live per-key capacity.
+
+        `exclude` drops models that just failed upstream (e.g. a provider 503), so the
+        run slides down the chain to the next provider instead of retrying a dead one.
+        """
         client = client if client is not None else self.client
-        candidates = self.cfg.candidates(phase, PHASE_ROLE.get(phase, "deep"))
+        blocked = exclude or set()
+        candidates = [m for m in self.cfg.candidates(phase, PHASE_ROLE.get(phase, "deep")) if m not in blocked]
         if not candidates:
-            return self.cfg.model_for(PHASE_ROLE.get(phase, "deep"))
+            fallback = self.cfg.model_for(PHASE_ROLE.get(phase, "deep"))
+            return fallback
         if client is None or not _capacity_aware(client):
             return candidates[0]
 
@@ -69,6 +81,7 @@ class ModelRouter:
             servable,
             key=lambda m: (client.wait_estimate(m, min(need, self.context_budget_for(m)) if need else 0), servable.index(m)),
         )
+
 
     # --------------------------------------------------------------- budgets
     def context_budget_for(self, model: str) -> int:
