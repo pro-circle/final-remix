@@ -23,6 +23,11 @@ class ModelError(RuntimeError):
     pass
 
 
+class UpstreamUnavailable(ModelError):
+    """The provider itself is failing (HTTP 5xx / network). Another model may still work."""
+
+
+
 class RequestTooLarge(ModelError):
     """One request exceeded the per-minute token ceiling (HTTP 413)."""
 
