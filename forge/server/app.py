@@ -88,8 +88,9 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/agent/run")
     def start_run(body: RunRequest) -> dict[str, Any]:
         cfg = load_config()
-        if not cfg.api_keys:
-            raise HTTPException(400, "No Groq API keys configured")
+        if not cfg.all_keys:
+            raise HTTPException(400, "No Groq or Gemini API keys configured")
+
         bus = EventBus()
         events: queue.Queue[Any] = queue.Queue()
         bus.subscribe(lambda event: events.put(event.to_dict()))
@@ -99,7 +100,7 @@ def create_app(root: Path) -> FastAPI:
             bus=bus,
             store=store,
             policy=ApprovalPolicy(auto_approve=body.auto_approve),
-            client=GroqClient(cfg, KeyManager(cfg.api_keys)),
+            client=FleetClient(cfg),
         )
 
         holder: dict[str, str] = {}
