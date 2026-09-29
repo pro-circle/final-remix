@@ -312,7 +312,7 @@ def init(
         for file in written:
             console.print(f"[forge.ok]Wrote:[/] [forge.text]{file}[/]")
     console.print(
-        "\n[forge.dim]Copy .env.example to .env, paste your Groq keys, then run `forge` in this folder.[/]"
+        "\n[forge.dim]Copy .env.example to .env, paste your Groq and/or Gemini keys, then run `forge` in this folder.[/]"
     )
 
 

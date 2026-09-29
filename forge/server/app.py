@@ -20,8 +20,8 @@ from pydantic import BaseModel
 
 from forge.config import load_config, redact
 from forge.events import EventBus
-from forge.models.client import GroqClient
-from forge.models.key_manager import KeyManager
+from forge.models.client import FleetClient
+
 from forge.orchestrator.engine import Orchestrator
 from forge.repo.detector import detect, repo_map
 from forge.sandbox.checkpoints import CheckpointManager
