@@ -20,7 +20,10 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Google AI Studio's OpenAI-compatible endpoint (same request/response shape as Groq).
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-GEMINI_FLASH = "gemini-2.5-flash"
+# Gemini 2.5 models are retired for new API keys; 3.8-flash is Google's recommended
+# successor, 3.5-flash-lite the cheaper fallback (verified live with new-format keys).
+GEMINI_FLASH = "gemini-3.8-flash"
+GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
 PROVIDER_ENV = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
 MAX_KEYS_PER_PROVIDER = 5
 
@@ -35,6 +38,7 @@ MODEL_CONTEXT = {
     "openai/gpt-oss-20b": 131072,
     "qwen/qwen3.8-27b": 131072,
     GEMINI_FLASH: 1_048_576,
+    GEMINI_FLASH_LITE: 1_048_576,
 }
 
 # Groq free-tier tokens-per-minute ceilings. A single request larger than this is
@@ -47,11 +51,12 @@ MODEL_TPM = {
     "llama-3.1-8b-instant": 6000,
     "llama-3.3-70b-versatile": 12000,
     GEMINI_FLASH: 250_000,
+    GEMINI_FLASH_LITE: 250_000,
 }
 DEFAULT_TPM = 6000
 
 # Free-tier requests-per-minute, per key (each key is a separate org with its own bucket).
-# Override in config.toml: [limits] rpm = { "gemini-2.5-flash" = 10 }
+# Override in config.toml: [limits] rpm = { "gemini-3.8-flash" = 10 }
 MODEL_RPM = {
     "openai/gpt-oss-120b": 30,
     "openai/gpt-oss-20b": 30,
@@ -59,6 +64,7 @@ MODEL_RPM = {
     "llama-3.1-8b-instant": 30,
     "llama-3.3-70b-versatile": 30,
     GEMINI_FLASH: 10,
+    GEMINI_FLASH_LITE: 10,
 }
 DEFAULT_RPM = 30
 
@@ -67,16 +73,16 @@ DEFAULT_RPM = 30
 # now. Models whose provider has no keys are skipped. Override per phase under [routing].
 DEFAULT_ROUTING: dict[str, list[str]] = {
     # Token-heavy reading/reasoning -> Gemini's 250k TPM first.
-    "explore": [GEMINI_FLASH, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
-    "plan": [GEMINI_FLASH, "openai/gpt-oss-120b"],
-    "inspect": [GEMINI_FLASH, "openai/gpt-oss-120b"],
+    "explore": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "plan": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "inspect": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
     # Tool use and part edits -> Groq's fast models, spill to Gemini when saturated.
-    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, "openai/gpt-oss-20b"],
-    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH],
-    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, "openai/gpt-oss-120b"],
-    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, "openai/gpt-oss-120b"],
-    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH],
-    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH],
+    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-20b"],
+    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE],
+    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE],
+    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH, GEMINI_FLASH_LITE],
 }
 # Headroom kept per request for the model's reply and token-estimate error.
 TPM_REPLY_HEADROOM = 1800
@@ -244,7 +250,7 @@ def write_starter_config() -> Path:
                     "[routing]",
                     "# Optional per-phase model preference; Forge sends each request to the first",
                     "# model with free TPM/RPM right now. Example:",
-                    '# code = ["openai/gpt-oss-120b", "gemini-2.5-flash"]',
+                    '# code = ["openai/gpt-oss-120b", "gemini-3.8-flash"]',
                     "",
                     "[models]",
                     'fast = "openai/gpt-oss-20b"',
