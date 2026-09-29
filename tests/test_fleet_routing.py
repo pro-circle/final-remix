@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 
 import forge.config as config_mod
-from forge.config import GEMINI_FLASH, GEMINI_FLASH_LITE, Config, load_config
+from forge.config import GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, Config, load_config
 from forge.models.client import FleetClient
-from forge.models.key_manager import KeyManager
+from forge.models.key_manager import KeyManager, ModelUnavailable
 from forge.models.router import PHASE_ROLE, ModelRouter
 
 GROQ_NAMES = ("GROQ_API_KEY", *(f"GROQ_API_KEY_{i}" for i in range(1, 6)))
@@ -135,7 +135,7 @@ def test_router_spills_to_groq_when_gemini_is_saturated():
     fleet = FleetClient(cfg)
     try:
         gem_keys = fleet.providers["gemini"].keys
-        for model in (GEMINI_FLASH, GEMINI_FLASH_LITE):
+        for model in (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY):
             for _ in range(cfg.rpm_limit(model)):
                 gem_keys.record(gem_keys.states[0], model, 10)
         assert ModelRouter(cfg, fleet).choose("explore", need=5_000) == FAST
@@ -171,7 +171,7 @@ def test_router_picks_soonest_free_model_when_all_are_full():
     cfg = Config(api_keys=["gsk_a"], gemini_keys=["AIza_a"])
     fleet = FleetClient(cfg)
     try:
-        for provider, models in (("groq", (DEEP, FAST)), ("gemini", (GEMINI_FLASH, GEMINI_FLASH_LITE))):
+        for provider, models in (("groq", (DEEP, FAST)), ("gemini", (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY))):
             keys = fleet.providers[provider].keys
             for model in models:
                 for _ in range(cfg.rpm_limit(model)):
@@ -194,3 +194,102 @@ def test_groq_only_setup_behaves_exactly_as_before():
     assert router.choose("explore") == FAST
     assert router.choose("code") == DEEP
     assert router.context_budget_for(router.choose("code")) < cfg.tpm_limit(DEEP)
+
+
+# ------------------------------------------------------- per-key model sets
+K1 = [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY]
+K2 = [GEMINI_FLASH, GEMINI_FLASH_LITE]
+
+
+def _two_key_fleet():
+    cfg = Config(api_keys=["gsk_a"], gemini_keys=["AQ_one", "AQ_two"], key_models={"AQ_one": K1, "AQ_two": K2})
+    return cfg, FleetClient(cfg)
+
+
+def _fill(keys, state, model, cfg):
+    for _ in range(cfg.rpm_limit(model)):
+        keys.record(state, model, 10)
+
+
+def test_key_models_load_from_dotenv(tmp_path, monkeypatch, clean_env):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GEMINI_API_KEY_2_MODELS", raising=False)
+    (tmp_path / ".env").write_text(
+        "GEMINI_API_KEY=AQ_one\nGEMINI_API_KEY_2=AQ_two\n"
+        f"GEMINI_API_KEY_2_MODELS={GEMINI_FLASH}, {GEMINI_FLASH_LITE}\n",
+        encoding="utf-8",
+    )
+    cfg = load_config()
+    assert cfg.key_models == {"AQ_two": K2}
+    monkeypatch.delenv("GEMINI_API_KEY_2_MODELS", raising=False)
+
+
+def test_legacy_model_only_goes_to_the_key_that_supports_it():
+    km = KeyManager(["AQ_one", "AQ_two"], "gemini", {"AQ_one": K1, "AQ_two": K2})
+    assert [km.acquire(GEMINI_LEGACY).key for _ in range(3)] == ["AQ_one"] * 3
+    assert {km.acquire(GEMINI_FLASH).key for _ in range(4)} == {"AQ_one", "AQ_two"}
+
+
+def test_default_is_35_flash_then_lite_then_25():
+    cfg, fleet = _two_key_fleet()
+    try:
+        router = ModelRouter(cfg, fleet)
+        keys = fleet.providers["gemini"].keys
+        assert router.choose("explore", need=5_000) == GEMINI_FLASH
+        for st in keys.states:
+            _fill(keys, st, GEMINI_FLASH, cfg)
+        assert router.choose("explore", need=5_000) == GEMINI_FLASH_LITE
+        for st in keys.states:
+            _fill(keys, st, GEMINI_FLASH_LITE, cfg)
+        assert router.choose("explore", need=5_000) == GEMINI_LEGACY
+        assert keys.acquire(GEMINI_LEGACY).key == "AQ_one"
+    finally:
+        fleet.close()
+
+
+def test_25_not_used_while_one_key_still_has_35_room():
+    cfg, fleet = _two_key_fleet()
+    try:
+        keys = fleet.providers["gemini"].keys
+        _fill(keys, keys.states[0], GEMINI_FLASH, cfg)
+        _fill(keys, keys.states[0], GEMINI_FLASH_LITE, cfg)
+        assert ModelRouter(cfg, fleet).choose("explore", need=5_000) == GEMINI_FLASH  # key 2 serves it
+    finally:
+        fleet.close()
+
+
+def test_detected_unsupported_model_is_learned_per_key():
+    km = KeyManager(["AQ_one", "AQ_two"], "gemini")  # nothing declared
+    km.report_unsupported(km.states[1], GEMINI_LEGACY)
+    assert [km.acquire(GEMINI_LEGACY).key for _ in range(2)] == ["AQ_one", "AQ_one"]
+    km.report_unsupported(km.states[0], GEMINI_LEGACY)
+    assert not km.serves(GEMINI_LEGACY)
+    with pytest.raises(ModelUnavailable):
+        km.acquire(GEMINI_LEGACY)
+    assert km.wait_estimate(GEMINI_LEGACY, 10, 250_000, 10) == float("inf")
+
+
+def test_client_learns_404_and_retries_on_other_key(monkeypatch):
+    import httpx
+
+    cfg = Config(gemini_keys=["AQ_one", "AQ_two"])
+    fleet = FleetClient(cfg)
+    client = fleet.providers["gemini"]
+    seen = []
+
+    def fake_post(url, headers, json):
+        key = headers["Authorization"].split()[-1]
+        seen.append(key)
+        req = httpx.Request("POST", url)
+        if key == "AQ_one":
+            return httpx.Response(404, text="model no longer available", request=req)
+        body = {"choices": [{"message": {"content": "ready"}}], "usage": {"total_tokens": 5}}
+        return httpx.Response(200, json=body, request=req)
+
+    monkeypatch.setattr(client._client, "post", fake_post)
+    try:
+        out = fleet.chat(model=GEMINI_LEGACY, messages=[{"role": "user", "content": "hi"}])
+        assert out.content == "ready" and seen == ["AQ_one", "AQ_two"]
+        assert GEMINI_LEGACY in client.keys.states[0].unsupported
+    finally:
+        fleet.close()
