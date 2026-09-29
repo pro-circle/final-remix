@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from forge.config import Config, provider_for, redact
-from forge.models.key_manager import KeyManager
+from forge.models.key_manager import KeyManager, ModelUnavailable  # noqa: F401 (re-exported)
 
 
 class BudgetExceeded(RuntimeError):
