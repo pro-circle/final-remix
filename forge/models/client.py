@@ -232,7 +232,11 @@ class GroqClient:
                 raw=data,
             )
 
-        raise ModelError(f"All {self.name} attempts failed: {last_error}")
+        message = f"All {self.name} attempts failed: {last_error}"
+        if last_error.startswith(("upstream", "network", "rate limited")):
+            raise UpstreamUnavailable(message)  # recoverable: try another model/provider
+        raise ModelError(message)
+
 
     # Capacity queries used by the scheduler.
     def serves(self, model: str) -> bool:
