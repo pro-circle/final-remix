@@ -35,10 +35,12 @@ from forge.events import (
 from forge.models.client import (
     BudgetExceeded,
     Completion,
+    FleetClient,
     GroqClient,
     ModelError,
     RequestTooLarge,
 )
+
 from forge.models.router import ModelRouter
 from forge.orchestrator.prompts import ROLE_PROMPTS, project_briefing
 from forge.repo.detector import ProjectProfile, detect, repo_map
@@ -71,7 +73,7 @@ class Orchestrator:
         bus: EventBus,
         store: Store,
         policy: ApprovalPolicy,
-        client: GroqClient | None = None,
+        client: GroqClient | FleetClient | None = None,
         profile: ProjectProfile | None = None,
         registry: ToolRegistry | None = None,
     ) -> None:
@@ -80,11 +82,12 @@ class Orchestrator:
         self.bus = bus
         self.store = store
         self.policy = policy
-        self.client = client or GroqClient(cfg)
-        self.router = ModelRouter(cfg)
+        self.client = client or FleetClient(cfg)
+        self.router = ModelRouter(cfg, self.client)
         self.profile = profile or detect(self.root)
         self.registry = registry or build_registry()
         self.terminal = TerminalSession(root=self.root)
+
 
     # ------------------------------------------------------------------ public
     def run(self, request: str, mode: str = "task") -> RunResult:
@@ -253,40 +256,54 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ model
     def _briefing(self, request: str, phase: str) -> str:
-        budget = self.router.context_budget(phase)
+        budget = self.router.context_budget_for(self._pick(phase))
+
         # Small windows (free-tier TPM) get a short tree and a lean preload; the agent
         # then reads everything else itself, page by page, through read_file.
         tree_entries = 300 if budget > 40_000 else max(40, budget // 60)
         context = build_repo_context(self.root, request, int(budget * 0.3))
         return project_briefing(self.profile.summary(), repo_map(self.root, tree_entries), context)
 
-    def _chat(self, *, phase: str, model: str, messages: list[dict[str, Any]], tools=None):
-        """Fit the prompt below the request budget; on a 413 shrink further and retry."""
-        budget = self.router.context_budget(phase)
+    def _pick(self, phase: str, messages: list[dict[str, Any]] | None = None) -> str:
+        """Model for this phase, chosen from the phase's chain by live key capacity."""
+        need = messages_tokens(messages) + 1_000 if messages else 0
+        return self.router.choose(phase, need=need, client=self.client)
+
+    def _chat(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        tools=None,
+        model: str | None = None,
+    ):
+        """Pick a model with free capacity, fit the prompt to it; on a 413 shrink and retry."""
+        chosen = model or self._pick(phase, messages)
+        budget = self.router.context_budget_for(chosen)
         for _ in range(4):
             fitted = fit_messages(messages, budget)
             try:
                 if tools is None:
-                    return fitted, self.client.chat(model=model, messages=fitted)
-                return fitted, self.client.chat(model=model, messages=fitted, tools=tools)
+                    return fitted, self.client.chat(model=chosen, messages=fitted)
+                return fitted, self.client.chat(model=chosen, messages=fitted, tools=tools)
             except RequestTooLarge as exc:
                 limit = exc.limit or budget
                 # Our estimate was low for this text: learn the real ceiling and shrink.
-                self.cfg.tpm_limits[model] = min(self.cfg.tpm_limit(model), limit)
+                self.cfg.tpm_limits[chosen] = min(self.cfg.tpm_limit(chosen), limit)
                 budget = max(1_500, int(min(budget, limit - 1_800) * 0.7))
-                self.bus.emit(NOTICE, text=f"Prompt too large for {model}; shrinking to ~{budget} tokens and retrying.")
+                self.bus.emit(NOTICE, text=f"Prompt too large for {chosen}; shrinking to ~{budget} tokens and retrying.")
         raise ModelError(
-            f"{model} rejects even a {budget}-token prompt. Raise [limits] in ~/.forge/config.toml "
+            f"{chosen} rejects even a {budget}-token prompt. Raise [limits] in ~/.forge/config.toml "
             "or switch [models] to one with a higher tokens-per-minute limit."
         )
 
     def _single_shot(self, *, phase: str, briefing: str, instruction: str) -> str:
-        model = self.router.model_for_phase(phase)
-        self.bus.emit(PHASE, phase=phase, model=model)
         messages = [
             {"role": "system", "content": ROLE_PROMPTS[phase] + "\n\n" + briefing},
             {"role": "user", "content": instruction},
         ]
+        model = self._pick(phase, messages)
+        self.bus.emit(PHASE, phase=phase, model=model)
         _, completion = self._chat(phase=phase, model=model, messages=messages)
         return completion.content.strip()
 
@@ -299,9 +316,10 @@ class Orchestrator:
         instruction: str,
         max_steps: int,
     ) -> str:
-        model = self.router.model_for_phase(phase)
-        budget = self.router.context_budget(phase)
+        model = self._pick(phase)
+        budget = self.router.context_budget_for(model)
         self.bus.emit(PHASE, phase=phase, model=model, run_id=ctx.run_id)
+
         # One file page may use ~35% of a request; long files are read in several calls.
         ctx.read_chunk_chars = max(3_000, int(budget * 0.35 * 3.6))
 
@@ -328,9 +346,18 @@ class Orchestrator:
         seen: set[str] = set()  # identical read-only calls since the last change
 
         for step in range(max_steps):
+            # Re-pick every step: a saturated model hands the next turn to one with headroom.
+            step_model = self._pick(phase, messages)
+            if step_model != model:
+                model = step_model
+                self.bus.emit(PHASE, phase=phase, model=model, run_id=ctx.run_id)
+                ctx.read_chunk_chars = max(
+                    3_000, int(self.router.context_budget_for(model) * 0.35 * 3.6)
+                )
             messages, completion = self._chat(
                 phase=phase, model=model, messages=messages, tools=tools
             )
+
             if completion.content.strip():
                 self.bus.emit(
                     THOUGHT, run_id=ctx.run_id, phase=phase, text=completion.content.strip()[:4000]

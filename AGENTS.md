@@ -8,3 +8,14 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+## Forge (Python agent) rules
+
+- All model calls go through `FleetClient` (`forge/models/client.py`), never a
+  single-provider client — it owns one `GroqClient`-style transport per provider
+  and routes by model name, so adding a provider needs no caller changes.
+- Model choice per phase goes through `ModelRouter.choose(phase, need, client)`
+  (`forge/models/router.py`), which walks `Config.candidates()` and picks the
+  first model with live per-key TPM/RPM headroom — keeps free tiers from 429ing.
+- Rate limits and key rotation live in `KeyManager` (per provider, per key, per
+  model, 60s sliding window); nothing else may track usage, or the budget splits.

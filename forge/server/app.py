@@ -20,8 +20,8 @@ from pydantic import BaseModel
 
 from forge.config import load_config, redact
 from forge.events import EventBus
-from forge.models.client import GroqClient
-from forge.models.key_manager import KeyManager
+from forge.models.client import FleetClient
+
 from forge.orchestrator.engine import Orchestrator
 from forge.repo.detector import detect, repo_map
 from forge.sandbox.checkpoints import CheckpointManager
@@ -88,8 +88,9 @@ def create_app(root: Path) -> FastAPI:
     @app.post("/api/agent/run")
     def start_run(body: RunRequest) -> dict[str, Any]:
         cfg = load_config()
-        if not cfg.api_keys:
-            raise HTTPException(400, "No Groq API keys configured")
+        if not cfg.all_keys:
+            raise HTTPException(400, "No Groq or Gemini API keys configured")
+
         bus = EventBus()
         events: queue.Queue[Any] = queue.Queue()
         bus.subscribe(lambda event: events.put(event.to_dict()))
@@ -99,7 +100,7 @@ def create_app(root: Path) -> FastAPI:
             bus=bus,
             store=store,
             policy=ApprovalPolicy(auto_approve=body.auto_approve),
-            client=GroqClient(cfg, KeyManager(cfg.api_keys)),
+            client=FleetClient(cfg),
         )
 
         holder: dict[str, str] = {}
@@ -189,7 +190,18 @@ def create_app(root: Path) -> FastAPI:
 
     @app.get("/api/usage/keys")
     def key_health() -> dict[str, Any]:
+        from forge.models.router import PHASE_ROLE
+
         cfg = load_config()
-        return {"keys": KeyManager(cfg.api_keys).health(), "models": cfg.models}
+        fleet = FleetClient(cfg)
+        try:
+            return {
+                "keys": fleet.keys.health(),
+                "models": cfg.models,
+                "routing": {p: cfg.candidates(p, role) for p, role in PHASE_ROLE.items()},
+            }
+        finally:
+            fleet.close()
+
 
     return app

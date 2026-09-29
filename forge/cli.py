@@ -20,8 +20,9 @@ from forge.config import (
     write_starter_config,
 )
 from forge.events import EventBus
-from forge.models.client import GroqClient
-from forge.models.key_manager import KeyManager
+from forge.models.client import FleetClient
+from forge.models.router import PHASE_ROLE
+
 from forge.orchestrator.engine import Orchestrator
 from forge.repo.detector import detect
 from forge.sandbox.checkpoints import CheckpointManager
@@ -85,7 +86,7 @@ def _make_orchestrator(root: Path, cfg: Config, auto: bool, verbose: bool):
     store = Store()
     renderer = CliRenderer(console, verbose=verbose)
     bus.subscribe(renderer.handle)
-    client = GroqClient(cfg, KeyManager(cfg.api_keys))
+    client = FleetClient(cfg)
     orchestrator = Orchestrator(
         root=root,
         cfg=cfg,
@@ -98,15 +99,17 @@ def _make_orchestrator(root: Path, cfg: Config, auto: bool, verbose: bool):
     return orchestrator, renderer, store, profile
 
 
+
 def _require_keys(cfg: Config) -> None:
-    if not cfg.api_keys:
+    if not cfg.all_keys:
         console.print(
             Panel(
                 Text(
-                    "No Groq API keys found.\n\n"
-                    "Add up to five keys to .env in this folder (copy .env.example)\n"
-                    "(run `forge init` to create it), or set GROQ_API_KEY\n"
-                    "(and GROQ_API_KEY_2 … GROQ_API_KEY_5) in your environment.",
+                    "No API keys found.\n\n"
+                    "Add up to five Groq keys and five Gemini keys to .env in this\n"
+                    "folder (copy .env.example, or run `forge init`), or set\n"
+                    "GROQ_API_KEY (… GROQ_API_KEY_5) and GEMINI_API_KEY\n"
+                    "(… GEMINI_API_KEY_5) in your environment.",
                     style="forge.text",
                 ),
                 title="[forge.fail]Not configured[/]",
@@ -115,6 +118,7 @@ def _require_keys(cfg: Config) -> None:
             )
         )
         raise typer.Exit(code=1)
+
 
 
 # ----------------------------------------------------------------- commands
@@ -258,18 +262,19 @@ def findings(run_id: Optional[str] = typer.Argument(None)) -> None:
 
 @app.command()
 def keys() -> None:
-    """Show key health and configured models."""
+    """Show key health (Groq and Gemini) and the model chain used per phase."""
     cfg = load_config()
     _require_keys(cfg)
-    _print_keys(GroqClient(cfg, KeyManager(cfg.api_keys)))
+    _print_keys(FleetClient(cfg))
 
 
-def _print_keys(client: GroqClient) -> None:
+def _print_keys(client: FleetClient) -> None:
     table = Table(border_style="forge.rule", title="[forge.brand]Keys[/]")
-    for column in ("key", "ok", "fails", "cooldown", "last error"):
+    for column in ("provider", "key", "ok", "fails", "cooldown", "last error"):
         table.add_column(column, style="forge.text")
     for item in client.keys.health():
         table.add_row(
+            str(item.get("provider", "groq")),
             str(item["label"]),
             str(item["successes"]),
             str(item["failures"]),
@@ -280,9 +285,15 @@ def _print_keys(client: GroqClient) -> None:
     models = Table.grid(padding=(0, 2))
     models.add_column(style="forge.dim")
     models.add_column(style="forge.text")
-    for role, model in client.cfg.models.items():
-        models.add_row(role, f"{model} ({client.cfg.context_window(model):,} ctx)")
-    console.print(Panel(models, title="[forge.accent]Models[/]", border_style="forge.rule"))
+    cfg = client.cfg
+    for phase in PHASE_ROLE:
+        chain = cfg.candidates(phase, PHASE_ROLE[phase])
+        models.add_row(
+            phase,
+            "  →  ".join(f"{m} ({cfg.tpm_limit(m):,} tpm)" for m in chain),
+        )
+    console.print(Panel(models, title="[forge.accent]Model chain per phase[/]", border_style="forge.rule"))
+
 
 
 @app.command()
@@ -301,7 +312,7 @@ def init(
         for file in written:
             console.print(f"[forge.ok]Wrote:[/] [forge.text]{file}[/]")
     console.print(
-        "\n[forge.dim]Copy .env.example to .env, paste your Groq keys, then run `forge` in this folder.[/]"
+        "\n[forge.dim]Copy .env.example to .env, paste your Groq and/or Gemini keys, then run `forge` in this folder.[/]"
     )
 
 
