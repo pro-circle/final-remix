@@ -23,6 +23,11 @@ class ModelError(RuntimeError):
     pass
 
 
+class UpstreamUnavailable(ModelError):
+    """The provider itself is failing (HTTP 5xx / network). Another model may still work."""
+
+
+
 class RequestTooLarge(ModelError):
     """One request exceeded the per-minute token ceiling (HTTP 413)."""
 
@@ -105,6 +110,10 @@ class GroqClient:
 
         last_error = ""
         attempt = 0
+        # A provider outage (5xx / network) must not eat the clock: try each key at most
+        # once, briefly, then hand back so the router can move to the next model/provider.
+        server_failures = 0
+        server_budget = max(2, len(self.keys.states))
         rate_limit_deadline = time.time() + 600  # keep waiting out rate limits for up to 10 min
         while attempt < max_attempts:
             state = self.keys.acquire(model, need, tpm, rpm)
@@ -120,9 +129,13 @@ class GroqClient:
             except httpx.HTTPError as exc:
                 last_error = f"network error: {exc}"
                 self.keys.report_failure(state, last_error)
-                time.sleep(min(8.0, 1.5**attempt) + random.random())
+                server_failures += 1
+                if server_failures >= server_budget:
+                    raise UpstreamUnavailable(f"{self.name} unreachable: {last_error}")
+                time.sleep(min(1.5, 0.4 * server_failures) + random.random() * 0.2)
                 attempt += 1
                 continue
+
 
             if response.status_code in (400, 401, 403) and (
                 "API_KEY_INVALID" in response.text or "API key not valid" in response.text
@@ -160,9 +173,15 @@ class GroqClient:
             if response.status_code >= 500:
                 self.keys.report_failure(state, f"server {response.status_code}")
                 last_error = f"upstream {response.status_code}"
-                time.sleep(min(8.0, 1.5**attempt) + random.random())
+                server_failures += 1
+                if server_failures >= server_budget:
+                    # The provider is down for this model right now: fail fast so the
+                    # orchestrator can fall back to the next model (and provider).
+                    raise UpstreamUnavailable(f"{self.name} {last_error} for {model}")
+                time.sleep(min(1.5, 0.4 * server_failures) + random.random() * 0.2)
                 attempt += 1
                 continue
+
 
             if (
                 response.status_code == 400
@@ -213,7 +232,11 @@ class GroqClient:
                 raw=data,
             )
 
-        raise ModelError(f"All {self.name} attempts failed: {last_error}")
+        message = f"All {self.name} attempts failed: {last_error}"
+        if last_error.startswith(("upstream", "network", "rate limited")):
+            raise UpstreamUnavailable(message)  # recoverable: try another model/provider
+        raise ModelError(message)
+
 
     # Capacity queries used by the scheduler.
     def serves(self, model: str) -> bool:
