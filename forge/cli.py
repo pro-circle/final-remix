@@ -101,14 +101,15 @@ def _make_orchestrator(root: Path, cfg: Config, auto: bool, verbose: bool):
 
 
 def _require_keys(cfg: Config) -> None:
-    if not cfg.api_keys:
+    if not cfg.all_keys:
         console.print(
             Panel(
                 Text(
-                    "No Groq API keys found.\n\n"
-                    "Add up to five keys to .env in this folder (copy .env.example)\n"
-                    "(run `forge init` to create it), or set GROQ_API_KEY\n"
-                    "(and GROQ_API_KEY_2 … GROQ_API_KEY_5) in your environment.",
+                    "No API keys found.\n\n"
+                    "Add up to five Groq keys and five Gemini keys to .env in this\n"
+                    "folder (copy .env.example, or run `forge init`), or set\n"
+                    "GROQ_API_KEY (… GROQ_API_KEY_5) and GEMINI_API_KEY\n"
+                    "(… GEMINI_API_KEY_5) in your environment.",
                     style="forge.text",
                 ),
                 title="[forge.fail]Not configured[/]",
@@ -117,6 +118,7 @@ def _require_keys(cfg: Config) -> None:
             )
         )
         raise typer.Exit(code=1)
+
 
 
 # ----------------------------------------------------------------- commands
