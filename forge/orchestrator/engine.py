@@ -256,7 +256,8 @@ class Orchestrator:
 
     # ------------------------------------------------------------------ model
     def _briefing(self, request: str, phase: str) -> str:
-        budget = self.router.context_budget(phase)
+        budget = self.router.context_budget_for(self._pick(phase))
+
         # Small windows (free-tier TPM) get a short tree and a lean preload; the agent
         # then reads everything else itself, page by page, through read_file.
         tree_entries = 300 if budget > 40_000 else max(40, budget // 60)
