@@ -20,7 +20,10 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Google AI Studio's OpenAI-compatible endpoint (same request/response shape as Groq).
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-GEMINI_FLASH = "gemini-2.5-flash"
+# Gemini 2.5 models are retired for new API keys; 3.8-flash is Google's recommended
+# successor, 3.5-flash-lite the cheaper fallback (verified live with new-format keys).
+GEMINI_FLASH = "gemini-3.8-flash"
+GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
 PROVIDER_ENV = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
 MAX_KEYS_PER_PROVIDER = 5
 
@@ -35,6 +38,7 @@ MODEL_CONTEXT = {
     "openai/gpt-oss-20b": 131072,
     "qwen/qwen3.8-27b": 131072,
     GEMINI_FLASH: 1_048_576,
+    GEMINI_FLASH_LITE: 1_048_576,
 }
 
 # Groq free-tier tokens-per-minute ceilings. A single request larger than this is
