@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import forge.config as config_mod
-from forge.config import GEMINI_FLASH, Config, load_config
+from forge.config import GEMINI_FLASH, GEMINI_FLASH_LITE, Config, load_config
 from forge.models.client import FleetClient
 from forge.models.key_manager import KeyManager
 from forge.models.router import PHASE_ROLE, ModelRouter
