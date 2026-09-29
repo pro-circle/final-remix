@@ -173,9 +173,15 @@ class GroqClient:
             if response.status_code >= 500:
                 self.keys.report_failure(state, f"server {response.status_code}")
                 last_error = f"upstream {response.status_code}"
-                time.sleep(min(8.0, 1.5**attempt) + random.random())
+                server_failures += 1
+                if server_failures >= server_budget:
+                    # The provider is down for this model right now: fail fast so the
+                    # orchestrator can fall back to the next model (and provider).
+                    raise UpstreamUnavailable(f"{self.name} {last_error} for {model}")
+                time.sleep(min(1.5, 0.4 * server_failures) + random.random() * 0.2)
                 attempt += 1
                 continue
+
 
             if (
                 response.status_code == 400
