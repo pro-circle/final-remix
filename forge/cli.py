@@ -20,8 +20,9 @@ from forge.config import (
     write_starter_config,
 )
 from forge.events import EventBus
-from forge.models.client import GroqClient
-from forge.models.key_manager import KeyManager
+from forge.models.client import FleetClient
+from forge.models.router import PHASE_ROLE
+
 from forge.orchestrator.engine import Orchestrator
 from forge.repo.detector import detect
 from forge.sandbox.checkpoints import CheckpointManager
@@ -85,7 +86,7 @@ def _make_orchestrator(root: Path, cfg: Config, auto: bool, verbose: bool):
     store = Store()
     renderer = CliRenderer(console, verbose=verbose)
     bus.subscribe(renderer.handle)
-    client = GroqClient(cfg, KeyManager(cfg.api_keys))
+    client = FleetClient(cfg)
     orchestrator = Orchestrator(
         root=root,
         cfg=cfg,
@@ -96,6 +97,7 @@ def _make_orchestrator(root: Path, cfg: Config, auto: bool, verbose: bool):
         profile=profile,
     )
     return orchestrator, renderer, store, profile
+
 
 
 def _require_keys(cfg: Config) -> None:
