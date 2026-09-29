@@ -190,7 +190,18 @@ def create_app(root: Path) -> FastAPI:
 
     @app.get("/api/usage/keys")
     def key_health() -> dict[str, Any]:
+        from forge.models.router import PHASE_ROLE
+
         cfg = load_config()
-        return {"keys": KeyManager(cfg.api_keys).health(), "models": cfg.models}
+        fleet = FleetClient(cfg)
+        try:
+            return {
+                "keys": fleet.keys.health(),
+                "models": cfg.models,
+                "routing": {p: cfg.candidates(p, role) for p, role in PHASE_ROLE.items()},
+            }
+        finally:
+            fleet.close()
+
 
     return app
