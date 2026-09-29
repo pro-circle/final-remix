@@ -150,7 +150,7 @@ def test_router_spills_to_gemini_when_groq_is_saturated():
         for model in (DEEP, FAST):
             for _ in range(cfg.rpm_limit(model)):
                 groq_keys.record(groq_keys.states[0], model, 10)
-        assert ModelRouter(cfg, fleet).choose("code", need=4_000) == GEMINI_FLASH
+        assert ModelRouter(cfg, fleet).choose("code", need=4_000) in (GEMINI_FLASH, GEMINI_FLASH_LITE)
     finally:
         fleet.close()
 
@@ -170,7 +170,7 @@ def test_router_picks_soonest_free_model_when_all_are_full():
     cfg = Config(api_keys=["gsk_a"], gemini_keys=["AIza_a"])
     fleet = FleetClient(cfg)
     try:
-        for provider, models in (("groq", (DEEP, FAST)), ("gemini", (GEMINI_FLASH,))):
+        for provider, models in (("groq", (DEEP, FAST)), ("gemini", (GEMINI_FLASH, GEMINI_FLASH_LITE))):
             keys = fleet.providers[provider].keys
             for model in models:
                 for _ in range(cfg.rpm_limit(model)):
