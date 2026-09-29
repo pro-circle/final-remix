@@ -345,9 +345,18 @@ class Orchestrator:
         seen: set[str] = set()  # identical read-only calls since the last change
 
         for step in range(max_steps):
+            # Re-pick every step: a saturated model hands the next turn to one with headroom.
+            step_model = self._pick(phase, messages)
+            if step_model != model:
+                model = step_model
+                self.bus.emit(PHASE, phase=phase, model=model, run_id=ctx.run_id)
+                ctx.read_chunk_chars = max(
+                    3_000, int(self.router.context_budget_for(model) * 0.35 * 3.6)
+                )
             messages, completion = self._chat(
                 phase=phase, model=model, messages=messages, tools=tools
             )
+
             if completion.content.strip():
                 self.bus.emit(
                     THOUGHT, run_id=ctx.run_id, phase=phase, text=completion.content.strip()[:4000]
