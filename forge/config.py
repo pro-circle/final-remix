@@ -73,16 +73,16 @@ DEFAULT_RPM = 30
 # now. Models whose provider has no keys are skipped. Override per phase under [routing].
 DEFAULT_ROUTING: dict[str, list[str]] = {
     # Token-heavy reading/reasoning -> Gemini's 250k TPM first.
-    "explore": [GEMINI_FLASH, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
-    "plan": [GEMINI_FLASH, "openai/gpt-oss-120b"],
-    "inspect": [GEMINI_FLASH, "openai/gpt-oss-120b"],
+    "explore": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "plan": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "inspect": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
     # Tool use and part edits -> Groq's fast models, spill to Gemini when saturated.
-    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, "openai/gpt-oss-20b"],
-    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH],
-    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, "openai/gpt-oss-120b"],
-    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, "openai/gpt-oss-120b"],
-    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH],
-    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH],
+    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-20b"],
+    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE],
+    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE],
+    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH, GEMINI_FLASH_LITE],
 }
 # Headroom kept per request for the model's reply and token-estimate error.
 TPM_REPLY_HEADROOM = 1800
