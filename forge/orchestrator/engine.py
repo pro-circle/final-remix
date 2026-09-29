@@ -263,33 +263,46 @@ class Orchestrator:
         context = build_repo_context(self.root, request, int(budget * 0.3))
         return project_briefing(self.profile.summary(), repo_map(self.root, tree_entries), context)
 
-    def _chat(self, *, phase: str, model: str, messages: list[dict[str, Any]], tools=None):
-        """Fit the prompt below the request budget; on a 413 shrink further and retry."""
-        budget = self.router.context_budget(phase)
+    def _pick(self, phase: str, messages: list[dict[str, Any]] | None = None) -> str:
+        """Model for this phase, chosen from the phase's chain by live key capacity."""
+        need = messages_tokens(messages) + 1_000 if messages else 0
+        return self.router.choose(phase, need=need, client=self.client)
+
+    def _chat(
+        self,
+        *,
+        phase: str,
+        messages: list[dict[str, Any]],
+        tools=None,
+        model: str | None = None,
+    ):
+        """Pick a model with free capacity, fit the prompt to it; on a 413 shrink and retry."""
+        chosen = model or self._pick(phase, messages)
+        budget = self.router.context_budget_for(chosen)
         for _ in range(4):
             fitted = fit_messages(messages, budget)
             try:
                 if tools is None:
-                    return fitted, self.client.chat(model=model, messages=fitted)
-                return fitted, self.client.chat(model=model, messages=fitted, tools=tools)
+                    return fitted, self.client.chat(model=chosen, messages=fitted)
+                return fitted, self.client.chat(model=chosen, messages=fitted, tools=tools)
             except RequestTooLarge as exc:
                 limit = exc.limit or budget
                 # Our estimate was low for this text: learn the real ceiling and shrink.
-                self.cfg.tpm_limits[model] = min(self.cfg.tpm_limit(model), limit)
+                self.cfg.tpm_limits[chosen] = min(self.cfg.tpm_limit(chosen), limit)
                 budget = max(1_500, int(min(budget, limit - 1_800) * 0.7))
-                self.bus.emit(NOTICE, text=f"Prompt too large for {model}; shrinking to ~{budget} tokens and retrying.")
+                self.bus.emit(NOTICE, text=f"Prompt too large for {chosen}; shrinking to ~{budget} tokens and retrying.")
         raise ModelError(
-            f"{model} rejects even a {budget}-token prompt. Raise [limits] in ~/.forge/config.toml "
+            f"{chosen} rejects even a {budget}-token prompt. Raise [limits] in ~/.forge/config.toml "
             "or switch [models] to one with a higher tokens-per-minute limit."
         )
 
     def _single_shot(self, *, phase: str, briefing: str, instruction: str) -> str:
-        model = self.router.model_for_phase(phase)
-        self.bus.emit(PHASE, phase=phase, model=model)
         messages = [
             {"role": "system", "content": ROLE_PROMPTS[phase] + "\n\n" + briefing},
             {"role": "user", "content": instruction},
         ]
+        model = self._pick(phase, messages)
+        self.bus.emit(PHASE, phase=phase, model=model)
         _, completion = self._chat(phase=phase, model=model, messages=messages)
         return completion.content.strip()
 
@@ -302,9 +315,10 @@ class Orchestrator:
         instruction: str,
         max_steps: int,
     ) -> str:
-        model = self.router.model_for_phase(phase)
-        budget = self.router.context_budget(phase)
+        model = self._pick(phase)
+        budget = self.router.context_budget_for(model)
         self.bus.emit(PHASE, phase=phase, model=model, run_id=ctx.run_id)
+
         # One file page may use ~35% of a request; long files are read in several calls.
         ctx.read_chunk_chars = max(3_000, int(budget * 0.35 * 3.6))
 
