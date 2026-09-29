@@ -262,18 +262,19 @@ def findings(run_id: Optional[str] = typer.Argument(None)) -> None:
 
 @app.command()
 def keys() -> None:
-    """Show key health and configured models."""
+    """Show key health (Groq and Gemini) and the model chain used per phase."""
     cfg = load_config()
     _require_keys(cfg)
-    _print_keys(GroqClient(cfg, KeyManager(cfg.api_keys)))
+    _print_keys(FleetClient(cfg))
 
 
-def _print_keys(client: GroqClient) -> None:
+def _print_keys(client: FleetClient) -> None:
     table = Table(border_style="forge.rule", title="[forge.brand]Keys[/]")
-    for column in ("key", "ok", "fails", "cooldown", "last error"):
+    for column in ("provider", "key", "ok", "fails", "cooldown", "last error"):
         table.add_column(column, style="forge.text")
     for item in client.keys.health():
         table.add_row(
+            str(item.get("provider", "groq")),
             str(item["label"]),
             str(item["successes"]),
             str(item["failures"]),
@@ -284,9 +285,15 @@ def _print_keys(client: GroqClient) -> None:
     models = Table.grid(padding=(0, 2))
     models.add_column(style="forge.dim")
     models.add_column(style="forge.text")
-    for role, model in client.cfg.models.items():
-        models.add_row(role, f"{model} ({client.cfg.context_window(model):,} ctx)")
-    console.print(Panel(models, title="[forge.accent]Models[/]", border_style="forge.rule"))
+    cfg = client.cfg
+    for phase in PHASE_ROLE:
+        chain = cfg.candidates(phase, PHASE_ROLE[phase])
+        models.add_row(
+            phase,
+            "  →  ".join(f"{m} ({cfg.tpm_limit(m):,} tpm)" for m in chain),
+        )
+    console.print(Panel(models, title="[forge.accent]Model chain per phase[/]", border_style="forge.rule"))
+
 
 
 @app.command()
