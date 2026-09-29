@@ -38,6 +38,7 @@ from forge.models.client import (
     FleetClient,
     GroqClient,
     ModelError,
+    ModelUnavailable,
     RequestTooLarge,
 )
 
@@ -280,12 +281,21 @@ class Orchestrator:
         """Pick a model with free capacity, fit the prompt to it; on a 413 shrink and retry."""
         chosen = model or self._pick(phase, messages)
         budget = self.router.context_budget_for(chosen)
-        for _ in range(4):
+        for _ in range(6):
             fitted = fit_messages(messages, budget)
             try:
                 if tools is None:
                     return fitted, self.client.chat(model=chosen, messages=fitted)
                 return fitted, self.client.chat(model=chosen, messages=fitted, tools=tools)
+            except ModelUnavailable as exc:
+                # No key can call this model any more (learned live): move down the chain.
+                if model is not None:
+                    raise ModelError(str(exc)) from exc
+                previous, chosen = chosen, self._pick(phase, messages)
+                if chosen == previous:
+                    raise ModelError(str(exc)) from exc
+                budget = self.router.context_budget_for(chosen)
+                self.bus.emit(NOTICE, text=f"{previous} unavailable on every key; switching to {chosen}.")
             except RequestTooLarge as exc:
                 limit = exc.limit or budget
                 # Our estimate was low for this text: learn the real ceiling and shrink.

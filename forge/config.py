@@ -20,10 +20,14 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Google AI Studio's OpenAI-compatible endpoint (same request/response shape as Groq).
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
-# Gemini 2.5 models are retired for new API keys; 3.8-flash is Google's recommended
-# successor, 3.5-flash-lite the cheaper fallback (verified live with new-format keys).
-GEMINI_FLASH = "gemini-3.8-flash"
+# Default Gemini pair is 3.5-flash then 3.5-flash-lite. 2.5-flash is retired for new keys
+# (older keys still have it), so it is the last Gemini resort, used only when both 3.5
+# models are unavailable or rate-limited on every key. 3.8-flash is known but not routed.
+GEMINI_FLASH = "gemini-3.5-flash"
 GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
+GEMINI_LEGACY = "gemini-2.5-flash"
+GEMINI_NEXT = "gemini-3.5-flash"
+GEMINI_MODELS = (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, GEMINI_LEGACY, GEMINI_NEXT)
 PROVIDER_ENV = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
 MAX_KEYS_PER_PROVIDER = 5
 
@@ -37,8 +41,7 @@ MODEL_CONTEXT = {
     "openai/gpt-oss-120b": 131072,
     "openai/gpt-oss-20b": 131072,
     "qwen/qwen3.8-27b": 131072,
-    GEMINI_FLASH: 1_048_576,
-    GEMINI_FLASH_LITE: 1_048_576,
+    **{m: 1_048_576 for m in GEMINI_MODELS},
 }
 
 # Groq free-tier tokens-per-minute ceilings. A single request larger than this is
@@ -50,21 +53,19 @@ MODEL_TPM = {
     "qwen/qwen3.8-27b": 6000,
     "llama-3.1-8b-instant": 6000,
     "llama-3.3-70b-versatile": 12000,
-    GEMINI_FLASH: 250_000,
-    GEMINI_FLASH_LITE: 250_000,
+    **{m: 250_000 for m in GEMINI_MODELS},
 }
 DEFAULT_TPM = 6000
 
 # Free-tier requests-per-minute, per key (each key is a separate org with its own bucket).
-# Override in config.toml: [limits] rpm = { "gemini-3.8-flash" = 10 }
+# Override in config.toml: [limits] rpm = { "gemini-3.5-flash" = 10 }
 MODEL_RPM = {
     "openai/gpt-oss-120b": 30,
     "openai/gpt-oss-20b": 30,
     "qwen/qwen3.8-27b": 30,
     "llama-3.1-8b-instant": 30,
     "llama-3.3-70b-versatile": 30,
-    GEMINI_FLASH: 10,
-    GEMINI_FLASH_LITE: 10,
+    **{m: 10 for m in GEMINI_MODELS},
 }
 DEFAULT_RPM = 30
 
@@ -73,16 +74,16 @@ DEFAULT_RPM = 30
 # now. Models whose provider has no keys are skipped. Override per phase under [routing].
 DEFAULT_ROUTING: dict[str, list[str]] = {
     # Token-heavy reading/reasoning -> Gemini's 250k TPM first.
-    "explore": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
-    "plan": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
-    "inspect": [GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
+    "explore": [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "plan": [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
+    "inspect": [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
     # Tool use and part edits -> Groq's fast models, spill to Gemini when saturated.
-    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-20b"],
-    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE],
-    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
-    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, "openai/gpt-oss-120b"],
-    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE],
-    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH, GEMINI_FLASH_LITE],
+    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-20b"],
+    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY],
+    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
+    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
+    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY],
+    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY],
 }
 # Headroom kept per request for the model's reply and token-estimate error.
 TPM_REPLY_HEADROOM = 1800
@@ -116,6 +117,9 @@ class Config:
     tpm_limits: dict[str, int] = field(default_factory=dict)
     rpm_limits: dict[str, int] = field(default_factory=dict)
     routing: dict[str, list[str]] = field(default_factory=dict)
+    # Optional per-key model allow-list (key -> models). Keys not listed may call any model;
+    # models a key can't use are also learned live from the provider's 404s.
+    key_models: dict[str, list[str]] = field(default_factory=dict)
     # Hard cap on prompt tokens per request (0 = derive from TPM and context window).
     max_request_tokens: int = 0
 
@@ -223,7 +227,20 @@ def load_config() -> Config:
     if gemini_env:
         cfg.gemini_keys = gemini_env + [k for k in cfg.gemini_keys if k not in gemini_env]
     cfg.gemini_keys = cfg.gemini_keys[:MAX_KEYS_PER_PROVIDER]
+    cfg.key_models.update(_key_models_from_env())
     return cfg
+
+
+def _key_models_from_env() -> dict[str, list[str]]:
+    """GEMINI_API_KEY_2_MODELS=gemini-3.5-flash,gemini-3.5-flash-lite limits that key's models."""
+    out: dict[str, list[str]] = {}
+    for prefix in PROVIDER_ENV.values():
+        for name in (prefix, *(f"{prefix}_{i}" for i in range(1, 6))):
+            key = os.environ.get(name, "").strip()
+            models = os.environ.get(f"{name}_MODELS", "").strip()
+            if key and models and "replace_me" not in key:
+                out[key] = [m.strip() for m in models.split(",") if m.strip()]
+    return out
 
 
 def ensure_home() -> None:
@@ -250,7 +267,7 @@ def write_starter_config() -> Path:
                     "[routing]",
                     "# Optional per-phase model preference; Forge sends each request to the first",
                     "# model with free TPM/RPM right now. Example:",
-                    '# code = ["openai/gpt-oss-120b", "gemini-3.8-flash"]',
+                    '# code = ["openai/gpt-oss-120b", "gemini-3.5-flash"]',
                     "",
                     "[models]",
                     'fast = "openai/gpt-oss-20b"',
