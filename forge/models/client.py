@@ -67,7 +67,7 @@ class GroqClient:
         self.provider = provider
         self.name = "Gemini" if provider == "gemini" else "Groq"
         self.base_url = cfg.base_url_for(provider)
-        self.keys = keys or KeyManager(cfg.keys_for(provider), provider)
+        self.keys = keys or KeyManager(cfg.keys_for(provider), provider, cfg.key_models)
         self.usage = usage or Usage()
         self._client = httpx.Client(timeout=httpx.Timeout(180.0, connect=15.0))
 
@@ -130,6 +130,13 @@ class GroqClient:
                 self.keys.report_invalid(state, "key rejected")
                 last_error = "key rejected"
                 attempt += 1
+                continue
+
+            if _model_unavailable(response):
+                # This key can't call this model (new keys lose retired models): learn it and
+                # try another key; KeyManager raises ModelUnavailable once none remain.
+                self.keys.report_unsupported(state, model)
+                last_error = f"{model} not available for this key"
                 continue
 
             if response.status_code == 429:
@@ -209,6 +216,9 @@ class GroqClient:
         raise ModelError(f"All {self.name} attempts failed: {last_error}")
 
     # Capacity queries used by the scheduler.
+    def serves(self, model: str) -> bool:
+        return self.keys.serves(model)
+
     def has_capacity(self, model: str, need: int) -> bool:
         return self.keys.headroom(model, need, self.cfg.tpm_limit(model), self.cfg.rpm_limit(model))
 
@@ -253,7 +263,8 @@ class FleetClient:
         return self._for(model).chat(model=model, **kwargs)
 
     def serves(self, model: str) -> bool:
-        return provider_for(model) in self.providers
+        client = self.providers.get(provider_for(model))
+        return client is not None and client.serves(model)
 
     def has_capacity(self, model: str, need: int) -> bool:
         return self.serves(model) and self._for(model).has_capacity(model, need)
@@ -271,6 +282,15 @@ class _FleetKeys:
 
     def __len__(self) -> int:
         return sum(len(c.keys) for c in self.fleet.providers.values())
+
+
+def _model_unavailable(response: httpx.Response) -> bool:
+    if response.status_code == 404:
+        return True
+    if response.status_code == 400:
+        text = response.text.lower()
+        return "model" in text and ("not found" in text or "no longer available" in text or "not supported" in text)
+    return False
 
 
 def _estimate(messages: list[dict[str, Any]]) -> int:
