@@ -51,6 +51,7 @@ MODEL_TPM = {
     "llama-3.1-8b-instant": 6000,
     "llama-3.3-70b-versatile": 12000,
     GEMINI_FLASH: 250_000,
+    GEMINI_FLASH_LITE: 250_000,
 }
 DEFAULT_TPM = 6000
 
@@ -63,6 +64,7 @@ MODEL_RPM = {
     "llama-3.1-8b-instant": 30,
     "llama-3.3-70b-versatile": 30,
     GEMINI_FLASH: 10,
+    GEMINI_FLASH_LITE: 10,
 }
 DEFAULT_RPM = 30
 
