@@ -35,10 +35,12 @@ from forge.events import (
 from forge.models.client import (
     BudgetExceeded,
     Completion,
+    FleetClient,
     GroqClient,
     ModelError,
     RequestTooLarge,
 )
+
 from forge.models.router import ModelRouter
 from forge.orchestrator.prompts import ROLE_PROMPTS, project_briefing
 from forge.repo.detector import ProjectProfile, detect, repo_map
@@ -71,7 +73,7 @@ class Orchestrator:
         bus: EventBus,
         store: Store,
         policy: ApprovalPolicy,
-        client: GroqClient | None = None,
+        client: GroqClient | FleetClient | None = None,
         profile: ProjectProfile | None = None,
         registry: ToolRegistry | None = None,
     ) -> None:
@@ -80,11 +82,12 @@ class Orchestrator:
         self.bus = bus
         self.store = store
         self.policy = policy
-        self.client = client or GroqClient(cfg)
-        self.router = ModelRouter(cfg)
+        self.client = client or FleetClient(cfg)
+        self.router = ModelRouter(cfg, self.client)
         self.profile = profile or detect(self.root)
         self.registry = registry or build_registry()
         self.terminal = TerminalSession(root=self.root)
+
 
     # ------------------------------------------------------------------ public
     def run(self, request: str, mode: str = "task") -> RunResult:
