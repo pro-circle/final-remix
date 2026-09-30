@@ -22,7 +22,7 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 # Default Gemini pair is 3.5-flash then 3.5-flash-lite. 2.5-flash is retired for new keys
 # (older keys still have it), so it is the last Gemini resort, used only when both 3.5
-# models are unavailable or rate-limited on every key. 3.8-flash is known but not routed.
+# models are unavailable or rate-limited on every key. 3.8-flash sits between the 3.5 pair and 2.5.
 GEMINI_FLASH = "gemini-3.5-flash"
 GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
 GEMINI_LEGACY = "gemini-2.5-flash"
@@ -69,6 +69,7 @@ MODEL_RPM = {
     "llama-3.1-8b-instant": 30,
     "llama-3.3-70b-versatile": 30,
     **{m: 10 for m in GEMINI_MODELS},
+    GEMINI_PRO: 5,
 }
 DEFAULT_RPM = 30
 
@@ -77,16 +78,16 @@ DEFAULT_RPM = 30
 # now. Models whose provider has no keys are skipped. Override per phase under [routing].
 DEFAULT_ROUTING: dict[str, list[str]] = {
     # Token-heavy reading/reasoning -> Gemini's 250k TPM first.
-    "explore": [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
-    "plan": [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
-    "inspect": [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
+    "explore": [*_GEM, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    "plan": [GEMINI_PRO, *_GEM, "openai/gpt-oss-120b"],
+    "inspect": [*_GEM, "openai/gpt-oss-120b"],
     # Tool use and part edits -> Groq's fast models, spill to Gemini when saturated.
-    "code": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-20b"],
-    "debug": ["openai/gpt-oss-120b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY],
-    "test": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
-    "review": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, "openai/gpt-oss-120b"],
-    "summarise": ["openai/gpt-oss-20b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY],
-    "visual": ["qwen/qwen3.8-27b", GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY],
+    "code": ["openai/gpt-oss-120b", *_GEM, "openai/gpt-oss-20b"],
+    "debug": ["openai/gpt-oss-120b", GEMINI_PRO, *_GEM],
+    "test": ["openai/gpt-oss-20b", *_GEM, "openai/gpt-oss-120b"],
+    "review": ["openai/gpt-oss-20b", *_GEM, "openai/gpt-oss-120b"],
+    "summarise": ["openai/gpt-oss-20b", *_GEM],
+    "visual": ["qwen/qwen3.8-27b", *_GEM],
 }
 # Headroom kept per request for the model's reply and token-estimate error.
 TPM_REPLY_HEADROOM = 1800

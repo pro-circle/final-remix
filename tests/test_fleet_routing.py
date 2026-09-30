@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import forge.config as config_mod
-from forge.config import GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, Config, load_config
+from forge.config import GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, GEMINI_NEXT, GEMINI_PRO, Config, load_config
 from forge.models.client import FleetClient
 from forge.models.key_manager import KeyManager, ModelUnavailable
 from forge.models.router import PHASE_ROLE, ModelRouter
@@ -123,7 +123,7 @@ def test_router_prefers_gemini_for_reading_phases():
     try:
         router = ModelRouter(cfg, fleet)
         assert router.choose("explore", need=5_000) == GEMINI_FLASH
-        assert router.choose("plan", need=5_000) == GEMINI_FLASH
+        assert router.choose("plan", need=5_000) == GEMINI_PRO
         assert router.choose("code", need=5_000) == DEEP  # tool use stays on Groq
         assert router.choose("review", need=1_000) == FAST
     finally:
@@ -135,7 +135,7 @@ def test_router_spills_to_groq_when_gemini_is_saturated():
     fleet = FleetClient(cfg)
     try:
         gem_keys = fleet.providers["gemini"].keys
-        for model in (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY):
+        for model in (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY, GEMINI_PRO):
             for _ in range(cfg.rpm_limit(model)):
                 gem_keys.record(gem_keys.states[0], model, 10)
         assert ModelRouter(cfg, fleet).choose("explore", need=5_000) == FAST
@@ -171,7 +171,7 @@ def test_router_picks_soonest_free_model_when_all_are_full():
     cfg = Config(api_keys=["gsk_a"], gemini_keys=["AIza_a"])
     fleet = FleetClient(cfg)
     try:
-        for provider, models in (("groq", (DEEP, FAST)), ("gemini", (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY))):
+        for provider, models in (("groq", (DEEP, FAST)), ("gemini", (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY, GEMINI_PRO))):
             keys = fleet.providers[provider].keys
             for model in models:
                 for _ in range(cfg.rpm_limit(model)):
@@ -241,6 +241,9 @@ def test_default_is_35_flash_then_lite_then_25():
         assert router.choose("explore", need=5_000) == GEMINI_FLASH_LITE
         for st in keys.states:
             _fill(keys, st, GEMINI_FLASH_LITE, cfg)
+        assert router.choose("explore", need=5_000) == GEMINI_NEXT
+        for st in keys.states:
+            _fill(keys, st, GEMINI_NEXT, cfg)
         assert router.choose("explore", need=5_000) == GEMINI_LEGACY
         assert keys.acquire(GEMINI_LEGACY).key == "AQ_one"
     finally:
@@ -293,3 +296,13 @@ def test_client_learns_404_and_retries_on_other_key(monkeypatch):
         assert GEMINI_LEGACY in client.keys.states[0].unsupported
     finally:
         fleet.close()
+
+
+def test_pro_leads_plan_and_2_5_is_last_gemini_everywhere():
+    cfg = Config(api_keys=["gsk_a"], gemini_keys=["AQ_one"])
+    assert cfg.candidates("plan")[0] == GEMINI_PRO
+    assert cfg.rpm_limit(GEMINI_PRO) == 5
+    for phase in PHASE_ROLE:
+        gem = [m for m in cfg.candidates(phase, PHASE_ROLE[phase]) if m.startswith("gemini") and m != GEMINI_PRO]
+        if gem:
+            assert gem == [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY]
