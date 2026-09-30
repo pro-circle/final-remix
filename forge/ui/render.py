@@ -174,6 +174,7 @@ class CliRenderer:
             )
 
     def summary(self, result) -> None:  # RunResult
+        self._set_status(None)
         table = Table.grid(padding=(0, 2))
         table.add_column(style="forge.dim")
         table.add_column(style="forge.text")
