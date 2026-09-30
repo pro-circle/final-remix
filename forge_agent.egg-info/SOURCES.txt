@@ -45,7 +45,10 @@ forge_agent.egg-info/requires.txt
 forge_agent.egg-info/top_level.txt
 tests/test_context_and_checkpoints.py
 tests/test_dotenv_keys.py
+tests/test_fleet_routing.py
 tests/test_hardening.py
 tests/test_key_manager.py
 tests/test_orchestrator_loop.py
+tests/test_status_and_failover.py
 tests/test_tools.py
+tests/test_tpm_budget.py

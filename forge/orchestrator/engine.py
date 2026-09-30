@@ -32,6 +32,7 @@ from forge.events import (
     TOOL_RESULT,
     USAGE,
 )
+from forge.models.client import UpstreamUnavailable
 from forge.models.client import (
     BudgetExceeded,
     Completion,

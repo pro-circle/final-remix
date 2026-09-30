@@ -59,7 +59,54 @@ class CliRenderer:
             Panel(body, title="[forge.brand]FORGE[/]", border_style="forge.rule", padding=(1, 2))
         )
 
+    # ------------------------------------------------------------ live status
+    _VERB = {
+        "edit_file": "editing", "patch_file": "editing", "replace_file_range": "editing",
+        "write_file": "writing", "create_file": "writing",
+        "delete_file": "deleting", "remove_file": "deleting",
+        "read_file": "reading", "list_dir": "listing", "list_files": "listing",
+        "search": "searching", "grep": "searching", "find_files": "searching",
+        "run_tests": "testing", "run_command": "running", "shell": "running",
+    }
+
+    def _set_status(self, text: str | None) -> None:
+        status = getattr(self, "_status", None)
+        if text is None:
+            if status is not None:
+                status.stop()
+                self._status = None
+            return
+        if status is None:
+            if not self.console.is_terminal:
+                return
+            self._status = self.console.status(f"[forge.dim]{text}[/]", spinner="dots")
+            self._status.start()
+        else:
+            status.update(f"[forge.dim]{text}[/]")
+
+    @classmethod
+    def status_text(cls, event: Event) -> str | None:
+        """What the spinner should say after this event (None = hide)."""
+        kind, data = event.kind, event.data
+        if kind == TOOL_CALL:
+            tool = str(data.get("tool", ""))
+            args = data.get("args") or {}
+            target = args.get("path") or args.get("command") or args.get("pattern") or ""
+            verb = cls._VERB.get(tool, "working")
+            return f"{verb} {str(target)[:80]}...".replace(" ...", "...")
+        if kind in (PHASE, TOOL_RESULT, PATCH, TEST_RESULT, NOTICE, RUN_STARTED):
+            return "thinking..." if kind != RUN_STARTED else "working..."
+        return None
+
     def handle(self, event: Event) -> None:
+        self._set_status(None)
+        try:
+            self._render(event)
+        finally:
+            if event.kind not in (RUN_FINISHED, RUN_FAILED):
+                self._set_status(self.status_text(event))
+
+    def _render(self, event: Event) -> None:
         kind = event.kind
         data = event.data
         if kind == RUN_STARTED:
@@ -127,6 +174,7 @@ class CliRenderer:
             )
 
     def summary(self, result) -> None:  # RunResult
+        self._set_status(None)
         table = Table.grid(padding=(0, 2))
         table.add_column(style="forge.dim")
         table.add_column(style="forge.text")
