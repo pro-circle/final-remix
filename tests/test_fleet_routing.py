@@ -241,9 +241,7 @@ def test_default_is_35_flash_then_lite_then_25():
         assert router.choose("explore", need=5_000) == GEMINI_FLASH_LITE
         for st in keys.states:
             _fill(keys, st, GEMINI_FLASH_LITE, cfg)
-        assert router.choose("explore", need=5_000) == GEMINI_NEXT
-        for st in keys.states:
-            _fill(keys, st, GEMINI_NEXT, cfg)
+        # neither key declares 3.8-flash, so it is skipped straight to 2.5 on key 1
         assert router.choose("explore", need=5_000) == GEMINI_LEGACY
         assert keys.acquire(GEMINI_LEGACY).key == "AQ_one"
     finally:
