@@ -27,8 +27,9 @@ GEMINI_FLASH = "gemini-3.5-flash"
 GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
 GEMINI_LEGACY = "gemini-2.5-flash"
 GEMINI_NEXT = "gemini-3.8-flash"  # newer 3.x flash; tried after the 3.5 pair, before 2.5
-GEMINI_PRO = "gemini-3.5-pro"  # deep reasoning, low free RPM; plan/debug first choice
-GEMINI_MODELS = (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY, GEMINI_PRO)
+# gemini-3.5-pro is not offered to AI Studio free-tier keys (verified 404 on both key
+# formats), so it is deliberately not routed.
+GEMINI_MODELS = (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY)
 # Shared Gemini fallback tail: 3.5 flash -> 3.5 lite -> 3.8 flash -> 2.5 flash (last resort).
 _GEM = [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY]
 PROVIDER_ENV = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
@@ -69,7 +70,6 @@ MODEL_RPM = {
     "llama-3.1-8b-instant": 30,
     "llama-3.3-70b-versatile": 30,
     **{m: 10 for m in GEMINI_MODELS},
-    GEMINI_PRO: 5,
 }
 DEFAULT_RPM = 30
 
@@ -79,11 +79,11 @@ DEFAULT_RPM = 30
 DEFAULT_ROUTING: dict[str, list[str]] = {
     # Token-heavy reading/reasoning -> Gemini's 250k TPM first.
     "explore": [*_GEM, "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
-    "plan": [GEMINI_PRO, *_GEM, "openai/gpt-oss-120b"],
+    "plan": [*_GEM, "openai/gpt-oss-120b"],
     "inspect": [*_GEM, "openai/gpt-oss-120b"],
     # Tool use and part edits -> Groq's fast models, spill to Gemini when saturated.
     "code": ["openai/gpt-oss-120b", *_GEM, "openai/gpt-oss-20b"],
-    "debug": ["openai/gpt-oss-120b", GEMINI_PRO, *_GEM],
+    "debug": ["openai/gpt-oss-120b", *_GEM],
     "test": ["openai/gpt-oss-20b", *_GEM, "openai/gpt-oss-120b"],
     "review": ["openai/gpt-oss-20b", *_GEM, "openai/gpt-oss-120b"],
     "summarise": ["openai/gpt-oss-20b", *_GEM],
