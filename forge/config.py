@@ -26,8 +26,11 @@ GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 GEMINI_FLASH = "gemini-3.5-flash"
 GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
 GEMINI_LEGACY = "gemini-2.5-flash"
-GEMINI_NEXT = "gemini-3.5-flash"
-GEMINI_MODELS = (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_LEGACY, GEMINI_LEGACY, GEMINI_NEXT)
+GEMINI_NEXT = "gemini-3.8-flash"  # newer 3.x flash; tried after the 3.5 pair, before 2.5
+GEMINI_PRO = "gemini-3.5-pro"  # deep reasoning, low free RPM; plan/debug first choice
+GEMINI_MODELS = (GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY, GEMINI_PRO)
+# Shared Gemini fallback tail: 3.5 flash -> 3.5 lite -> 3.8 flash -> 2.5 flash (last resort).
+_GEM = [GEMINI_FLASH, GEMINI_FLASH_LITE, GEMINI_NEXT, GEMINI_LEGACY]
 PROVIDER_ENV = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
 MAX_KEYS_PER_PROVIDER = 5
 
