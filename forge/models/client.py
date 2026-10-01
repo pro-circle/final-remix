@@ -97,7 +97,7 @@ class GroqClient:
         self.check_budget()
         payload: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": _prepare_messages(messages, self.provider),
             "temperature": temperature,
         }
         if tools:
@@ -334,11 +334,46 @@ def _normalise_tool_calls(raw: Any) -> list[dict[str, Any]]:
                 parsed = {"_raw": args}
         else:
             parsed = args or {}
-        calls.append(
-            {
-                "id": item.get("id") or f"call_{len(calls)}",
-                "name": fn.get("name") or "",
-                "arguments": parsed,
-            }
-        )
+        call: dict[str, Any] = {
+            "id": item.get("id") or f"call_{len(calls)}",
+            "name": fn.get("name") or "",
+            "arguments": parsed,
+        }
+        if item.get("extra_content"):
+            call["extra_content"] = item["extra_content"]  # carries Gemini thought_signature
+        calls.append(call)
     return calls
+
+
+# Google's documented placeholder for function calls that no Gemini model produced
+# (e.g. made by Groq after a failover); it tells Gemini to skip signature validation.
+_SKIP_SIGNATURE = "skip_thought_signature_validator"
+
+
+def _prepare_messages(messages: list[dict[str, Any]], provider: str) -> list[dict[str, Any]]:
+    """Adapt tool-call history for the target provider.
+
+    Gemini: the first tool call of each assistant turn must carry a thought signature;
+    calls without one (from another provider) get Google's skip placeholder.
+    Others: drop the Gemini-only extra_content field.
+    """
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        calls = message.get("tool_calls")
+        if message.get("role") != "assistant" or not calls:
+            out.append(message)
+            continue
+        if provider == "gemini":
+            fixed = [dict(c) for c in calls]
+            if not any(_signature(c) for c in fixed):
+                fixed[0]["extra_content"] = {"google": {"thought_signature": _SKIP_SIGNATURE}}
+        else:
+            fixed = [{k: v for k, v in c.items() if k != "extra_content"} for c in calls]
+        out.append({**message, "tool_calls": fixed})
+    return out
+
+
+def _signature(call: dict[str, Any]) -> str | None:
+    extra = call.get("extra_content") or {}
+    google = extra.get("google") if isinstance(extra, dict) else None
+    return google.get("thought_signature") if isinstance(google, dict) else None
