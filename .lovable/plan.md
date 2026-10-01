@@ -51,6 +51,17 @@ Roles: Explorer, Planner, Coder, Debugger, Tester, Reviewer, Inspector. Each has
 
 Built-in knowledge of React front ends, Go with Fiber, and PostgreSQL, applied by default.
 
+## Talks like a normal assistant
+
+Forge replies in plain language to whatever you type. It does not run the full task pipeline every time.
+
+- **Chat** ("hi", "what does this repo do?", "explain auth.ts"): a natural reply. It reads files first only if the answer needs them. Nothing is changed.
+- **Question about the code**: Forge explores with read-only tools, then answers in prose with file references.
+- **Task** ("fix the login bug", "add a /health route"): the full plan, edit, test and review loop, with short conversational updates along the way and a plain-language summary at the end.
+- **Unclear request**: Forge asks one short clarifying question before acting.
+- The session remembers earlier turns, so follow-ups like "now add tests for that" or "undo that" work.
+- Replies stream token by token, so text appears as it is written.
+
 ## Look and feel
 
 Dark terminal palette: near-black background, bone-white text, amber for activity, orange-red for failures, muted green for passes. Monospace, boxed panels, no emoji.
