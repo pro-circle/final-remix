@@ -412,6 +412,12 @@ class Orchestrator:
                                 "name": call["name"],
                                 "arguments": json.dumps(call["arguments"]),
                             },
+                            # Gemini 3 thought signatures must be echoed back verbatim.
+                            **(
+                                {"extra_content": call["extra_content"]}
+                                if call.get("extra_content")
+                                else {}
+                            ),
                         }
                         for call in completion.tool_calls
                     ],
